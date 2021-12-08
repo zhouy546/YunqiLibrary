@@ -7,6 +7,272 @@ using System.Threading;
 
 namespace YunqiLibrary
 {
+    public class TCP_Client {
+
+        private Thread t;
+
+        public delegate void CallBack<T>(T arg);
+
+        public event CallBack<string> TCPCallBackevent;
+
+        public TCP_Client(CallBack<string> TcpclientListeningAction)
+        {
+            TCPCallBackevent += TcpclientListeningAction;
+        }
+        struct LinkData
+        {
+            public string host;
+            public int port;
+            public string data;
+        };
+
+
+        public void TCPSenHex(string _host, int _port, string _data) {
+            LinkData linkData = new LinkData { host = _host, port = _port, data = _data };
+
+            t = new Thread(new ParameterizedThreadStart(sendHEX));
+
+            t.Start(linkData);
+        }
+
+        public void TCPSend(string _host, int _port, string _data)
+        {
+            LinkData linkData = new LinkData { host = _host, port = _port, data = _data };
+
+            t = new Thread(new ParameterizedThreadStart(send));
+
+            t.Start(linkData);
+        }
+
+
+        private void sendHEX(object _linkData)
+        {
+            LinkData linkdata = (LinkData)_linkData;
+
+            if (!Utility.checkIp(linkdata.host))
+            {
+                TCPCallBackevent.Invoke("ip地址不正确");
+
+                t.Abort();
+            }
+            string result = string.Empty;
+
+            IPAddress ipAddress = IPAddress.Parse(linkdata.host);
+
+            IPEndPoint ipep = new IPEndPoint(ipAddress, linkdata.port);//IP和端口
+
+            Socket clientSocket = new Socket(AddressFamily.InterNetwork, SocketType.Stream, ProtocolType.Tcp);
+
+            ConnectSocketDelegate connect = ConnectSocket;
+
+            IAsyncResult asyncResult = connect.BeginInvoke(ipep, clientSocket, null, null);
+
+            bool connectSuccess = asyncResult.AsyncWaitHandle.WaitOne(1000, false);
+
+            if (!connectSuccess)
+            {
+                TCPCallBackevent.Invoke("链接失败请检查网络链接");
+
+                t.Abort();
+            }
+
+            string exmessage = connect.EndInvoke(asyncResult);
+
+            if (!string.IsNullOrEmpty(exmessage))
+            {
+                t.Abort();
+            }
+
+
+            byte[] b = Utility.strToToHexByte(linkdata.data);
+
+            clientSocket.Send(b);
+
+            Thread.Sleep(500);
+
+            result = ReceiveLEDHex(clientSocket, 2000); //5*2 seconds timeout.
+                                                        // Debug.Log("Receive：" + result)             
+            Thread.Sleep(500);
+            DestroySocket(clientSocket);
+
+            if (result.Length > 0)
+            {
+                TCPCallBackevent.Invoke(result);
+            }
+
+            DestroySocket(clientSocket);
+
+            t.Abort();
+        }
+
+        private void send(object _linkData)
+        {
+            LinkData linkdata = (LinkData)_linkData;
+
+            if (!Utility.checkIp(linkdata.host))
+            {
+                TCPCallBackevent.Invoke("ip地址不正确");
+
+                t.Abort();
+            }
+            string result = string.Empty;
+
+            IPAddress ipAddress = IPAddress.Parse(linkdata.host);
+
+            IPEndPoint ipep = new IPEndPoint(ipAddress, linkdata.port);//IP和端口
+
+            Socket clientSocket = new Socket(AddressFamily.InterNetwork, SocketType.Stream, ProtocolType.Tcp);
+
+            ConnectSocketDelegate connect = ConnectSocket;
+
+            IAsyncResult asyncResult = connect.BeginInvoke(ipep, clientSocket, null, null);
+
+            bool connectSuccess = asyncResult.AsyncWaitHandle.WaitOne(1000, false);
+
+            if (!connectSuccess)
+            {
+                TCPCallBackevent.Invoke("链接失败请检查网络链接");
+
+                t.Abort();
+            }
+
+            string exmessage = connect.EndInvoke(asyncResult);
+
+            if (!string.IsNullOrEmpty(exmessage))
+            {
+                t.Abort();
+            }
+
+            //if (linkdata.isHEX)
+            //{
+            //    byte[] b = Utility.strToToHexByte(linkdata.data);
+
+            //    clientSocket.Send(b);
+
+
+            //    Thread.Sleep(500);
+
+            //    result = ReceiveLEDHex(clientSocket, 2000); //5*2 seconds timeout.
+            //                                                                         // Debug.Log("Receive：" + result)             
+            //}
+            //else
+            //{
+            clientSocket.Send(Encoding.Default.GetBytes(linkdata.data));
+
+            Thread.Sleep(500);
+
+            result = Receive(clientSocket, 2000);
+
+            Thread.Sleep(500);
+            DestroySocket(clientSocket);
+
+            if (result.Length > 0)
+            {
+                TCPCallBackevent.Invoke(result);
+            }
+
+            DestroySocket(clientSocket);
+
+            t.Abort();
+        }
+
+        private static void DestroySocket(Socket socket)
+        {
+            if (socket.Connected)
+            {
+                socket.Shutdown(SocketShutdown.Both);
+            }
+            socket.Close();
+        }
+
+        private string Receive(Socket socket, int timeout)
+        {
+            string result = string.Empty;
+            socket.ReceiveTimeout = timeout;
+            List<byte> data = new List<byte>();
+            byte[] buffer = new byte[1024];
+            int length = 0;
+            try
+            {
+                while ((length = socket.Receive(buffer)) > 0)
+                {
+                    for (int j = 0; j < length; j++)
+                    {
+                        data.Add(buffer[j]);
+                    }
+                    if (length < buffer.Length)
+                    {
+                        break;
+                    }
+                }
+            }
+            catch { }
+            if (data.Count > 0)
+            {
+                result = Encoding.Default.GetString(data.ToArray(), 0, data.Count);
+            }
+
+            return result;
+        }
+
+        private string ReceiveLEDHex(Socket socket, int timeout)
+        {
+            string result = string.Empty;
+            socket.ReceiveTimeout = timeout;
+            List<byte> data = new List<byte>();
+            byte[] buffer = new byte[1024];
+            int length = 0;
+            try
+            {
+                while ((length = socket.Receive(buffer)) > 0)
+                {
+                    for (int j = 0; j < length; j++)
+                    {
+                        data.Add(buffer[j]);
+                    }
+                    if (length < buffer.Length)
+                    {
+                        break;
+                    }
+                }
+            }
+            catch { }
+            if (data.Count > 0)
+            {            
+                byte[] bytes = data.ToArray();
+
+
+                if (bytes != null)
+                {
+                    for (int i = 0; i < bytes.Length; i++)
+                    {
+                        result += bytes[i].ToString("X2");
+                    }
+                }
+            }
+
+            return result;
+        }
+        private delegate string ConnectSocketDelegate(IPEndPoint ipep, Socket sock);
+        private string ConnectSocket(IPEndPoint ipep, Socket sock)
+        {
+            string exmessage = "";
+            try
+            {
+                sock.Connect(ipep);
+            }
+            catch (System.Exception ex)
+            {
+                exmessage = ex.Message;
+            }
+            finally
+            {
+            }
+
+            return exmessage;
+        }
+    }
+
     public class UDP
     {
 
@@ -98,5 +364,33 @@ namespace YunqiLibrary
             }
         }
         #endregion
+    }
+
+    public static class Utility
+    {
+        public static bool checkIp(string ipStr)
+        {
+            IPAddress ip;
+            if (IPAddress.TryParse(ipStr, out ip))
+            {
+                return true;
+            }
+            else
+            {
+                return false;
+            }
+        }
+
+        //十六进制字符串转byte数组
+        public static byte[] strToToHexByte(string hexString)
+        {
+            hexString = hexString.Replace(" ", "");
+            if ((hexString.Length % 2) != 0)
+                hexString += " ";
+            byte[] returnBytes = new byte[hexString.Length / 2];
+            for (int i = 0; i < returnBytes.Length; i++)
+                returnBytes[i] = Convert.ToByte(hexString.Substring(i * 2, 2), 16);
+            return returnBytes;
+        }
     }
 }
